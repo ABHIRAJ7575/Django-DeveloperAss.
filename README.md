@@ -5,6 +5,9 @@ A Django REST Framework API that computes an optimal driving route between two U
 ## Demo Video
 
 ### A short walkthrough of the project (UI, API, and core logic):https://www.loom.com/share/9d7a1404be0c411390271059ce46ce22
+## UI Image
+<img width="1919" height="918" alt="image" src="https://github.com/user-attachments/assets/51dca84f-9808-4b8e-9a16-5a96bc9d575a" />
+
 
 ## Prerequisites
 
