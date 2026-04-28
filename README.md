@@ -2,6 +2,10 @@
 
 A Django REST Framework API that computes an optimal driving route between two US locations and identifies the most cost-effective fuel stops along the way. The vehicle is assumed to have a 500-mile range and 10 MPG efficiency.
 
+## Demo Video
+
+### A short walkthrough of the project (UI, API, and core logic):https://www.loom.com/share/9d7a1404be0c411390271059ce46ce22
+
 ## Prerequisites
 
 - Python 3.11+
