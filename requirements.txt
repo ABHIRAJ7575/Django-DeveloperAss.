@@ -1,0 +1,8 @@
+django>=5.0
+djangorestframework
+pandas
+numpy
+requests
+python-dotenv
+hypothesis
+polyline

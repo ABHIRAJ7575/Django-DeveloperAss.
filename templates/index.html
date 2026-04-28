@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fuel Route Optimizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        #map { height: 100vh; }
+    </style>
+</head>
+<body class="flex h-screen">
+
+    <!-- Left panel -->
+    <div class="w-80 flex-shrink-0 bg-white shadow-lg p-6 flex flex-col gap-4 overflow-y-auto">
+        <h1 class="text-xl font-bold text-gray-800">Fuel Route Optimizer</h1>
+
+        <form id="route-form" class="flex flex-col gap-3">
+            <div>
+                <label for="start-location" class="block text-sm font-medium text-gray-700">Start Location</label>
+                <input type="text" id="start-location" placeholder="e.g. Chicago, IL"
+                       class="mt-1 block w-full rounded-md border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+                <label for="end-location" class="block text-sm font-medium text-gray-700">End Location</label>
+                <input type="text" id="end-location" placeholder="e.g. Los Angeles, CA"
+                       class="mt-1 block w-full rounded-md border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <button type="submit"
+                    class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 text-sm font-medium">
+                Find Route
+            </button>
+        </form>
+
+        <!-- Loading -->
+        <div id="loading" class="hidden flex items-center gap-2 text-sm text-gray-500">
+            <svg class="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <span>Calculating route...</span>
+        </div>
+
+        <!-- Error -->
+        <div id="error-message" class="hidden bg-red-50 border border-red-200 text-red-700 text-sm rounded-md p-3"></div>
+
+        <!-- Summary -->
+        <div id="summary" class="hidden bg-gray-50 rounded-md p-4 flex flex-col gap-2">
+            <h2 class="text-sm font-semibold text-gray-700">Trip Summary</h2>
+            <div class="flex justify-between text-sm">
+                <span class="text-gray-600">Total Distance:</span>
+                <span id="total-distance" class="font-medium text-gray-800"></span>
+            </div>
+            <div class="flex justify-between text-sm">
+                <span class="text-gray-600">Estimated Fuel Cost:</span>
+                <span id="total-cost" class="font-medium text-green-700"></span>
+            </div>
+            <div class="text-xs text-gray-500 mt-1">
+                <span id="stop-count"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Map -->
+    <div class="flex-1">
+        <div id="map"></div>
+    </div>
+
+    <script>
+    // ── Map init ──────────────────────────────────────────────────────────
+    const map = L.map('map').setView([39.5, -98.35], 4);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 19
+    }).addTo(map);
+
+    let routeLayer = null;
+    let markerLayers = [];
+
+    // ── Helpers ───────────────────────────────────────────────────────────
+    function clearMap() {
+        if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+        markerLayers.forEach(m => map.removeLayer(m));
+        markerLayers = [];
+    }
+
+    function showError(msg) {
+        const el = document.getElementById('error-message');
+        el.textContent = msg;
+        el.classList.remove('hidden');
+    }
+
+    function hideError()   { document.getElementById('error-message').classList.add('hidden'); }
+    function showLoading() { document.getElementById('loading').classList.remove('hidden'); }
+    function hideLoading() { document.getElementById('loading').classList.add('hidden'); }
+
+    function showSummary(data) {
+        // Backend keys: total_distance_miles, total_fuel_cost, fuel_stops
+        const distMiles  = data.total_distance_miles  || 0;
+        const fuelCost   = data.total_fuel_cost        || 0;
+        const stops      = data.fuel_stops             || [];
+
+        console.log('[FuelRoute] API response:', data);
+        console.log('[FuelRoute] distance:', distMiles, 'cost:', fuelCost, 'stops:', stops.length);
+
+        document.getElementById('total-distance').textContent = distMiles.toFixed(1) + ' miles';
+        document.getElementById('total-cost').textContent     = '$' + fuelCost.toFixed(2);
+        document.getElementById('stop-count').textContent     = stops.length + ' fuel stop(s)';
+        document.getElementById('summary').classList.remove('hidden');
+    }
+
+    // ── Form submit ───────────────────────────────────────────────────────
+    document.getElementById('route-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        hideError();
+        clearMap();
+        document.getElementById('summary').classList.add('hidden');
+
+        const start = document.getElementById('start-location').value.trim();
+        const end   = document.getElementById('end-location').value.trim();
+
+        if (!start || !end) {
+            showError('Please enter both start and end locations.');
+            return;
+        }
+
+        showLoading();
+
+        try {
+            const response = await fetch('/api/route/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ start_location: start, end_location: end })
+            });
+
+            const data = await response.json();
+            console.log('[FuelRoute] Raw response:', JSON.stringify(data).slice(0, 300));
+
+            if (!response.ok) {
+                showError(data.error || 'An error occurred. Please try again.');
+                return;
+            }
+
+            // Draw polyline
+            const polyline = data.route_polyline || [];
+            if (polyline.length > 0) {
+                routeLayer = L.polyline(polyline, { color: '#2563eb', weight: 4 }).addTo(map);
+                map.fitBounds(routeLayer.getBounds(), { padding: [20, 20] });
+            }
+
+            // Draw fuel stop markers
+            const stops = data.fuel_stops || [];
+            stops.forEach(function(stop) {
+                if (stop.latitude == null || stop.longitude == null) return;
+                const marker = L.marker([stop.latitude, stop.longitude]).addTo(map);
+                const price  = (stop.retail_price || 0).toFixed(3);
+                marker.bindPopup(
+                    '<strong>' + (stop.name || 'Fuel Stop') + '</strong><br>' +
+                    (stop.address || '') + '<br>' +
+                    (stop.city || '') + ', ' + (stop.state || '') + '<br>' +
+                    '$' + price + '/gal'
+                );
+                markerLayers.push(marker);
+            });
+
+            showSummary(data);
+
+        } catch (err) {
+            console.error('[FuelRoute] Error:', err);
+            showError('Network error. Please check your connection and try again.');
+        } finally {
+            hideLoading();
+        }
+    });
+    </script>
+</body>
+</html>
